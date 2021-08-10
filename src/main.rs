@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::env;
+use clap;
 use float_cmp::{ApproxEq,F32Margin};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -548,14 +549,32 @@ fn driver(nc_file: &str, verbosity: i8) -> Result<bool, String> {
     return Ok(overall_ok);
 }
 
-fn main() {
-    let clargs: Vec<String> = env::args().collect();
-    if clargs.len() != 2 || clargs[1] == "-h" || clargs[1] == "--help" {
-        eprintln!("USAGE: {} PRIVATE_NC_FILE", clargs[0]);
-        std::process::exit(1);
-    }
+#[derive(Debug)]
+struct CmdLineArgs {
+    nc_file: String,
+    verbosity: i8
+}
 
-    match driver(&clargs[1], 3) {
+fn parse_clargs() -> CmdLineArgs {
+    let yml = clap::load_yaml!("clargs.yml");
+    let clargs = clap::App::from_yaml(yml).version(clap::crate_version!()).get_matches();
+
+    let nc_file = clargs.value_of("nc_file").unwrap();
+    let nverb = clargs.occurrences_of("verbose");
+    let nquiet = clargs.occurrences_of("quiet");
+
+    let args = CmdLineArgs{
+        nc_file: String::from(nc_file),
+        verbosity: if nquiet > 0 {-1} else {nverb as i8}
+    };
+
+    return args;
+}
+
+fn main() {
+    let clargs = parse_clargs();
+
+    match driver(&clargs.nc_file, clargs.verbosity) {
         Ok(passes) => {
             if passes {std::process::exit(0);}
             else {std::process::exit(1);}

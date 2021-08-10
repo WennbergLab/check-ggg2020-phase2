@@ -1,0 +1,38 @@
+name: check-phase2
+about: Verifies that TCCON .private.nc files have been updated to GGG2020 Phase 2
+author: Joshua Laughner <jlaugh@caltech.edu>
+
+settings:
+  - ArgRequiredElseHelp
+  - DontCollapseArgsInUsage
+  - DeriveDisplayOrder
+  - UnifiedHelpMessage
+
+
+args:
+  - verbose:
+      short: v
+      long: verbose
+      help: "Increase the level of detail shown on screen"
+      long_help: >
+        Show details of which tests pass or fail. Repeating this argument increases the level of detail:
+
+        1: indicate whether each test (ADCF values, AICF values, window-to-window values, windows included, etc.) passed or not.
+
+        2: include details about whether the values for each window/gas is correct
+
+        3: include details about precisely which variables are correct or not.
+      
+      takes_value: false
+      multiple: true
+      overrides_with: quiet
+  - quiet:
+      short: q
+      long: --quiet
+      help: "Suppresses all standard output to the terminal; pass or fail will only be indicated by the exit code (0 = pass, >0 = fail)"
+      takes_value: false
+      overrides_with: verbose
+  - nc_file:
+      help: "The .private.nc file to check"
+      required: true
+      index: 1
