@@ -5,6 +5,13 @@ use float_cmp::{ApproxEq,F32Margin};
 use lazy_static::lazy_static;
 use regex::Regex;
 
+const GSETUP_VERSION: &'static str = "4.70; 2020-06-29; GCT";
+const GFIT_VERSION: &'static str = "5.28; 2020-04-24; GCT";
+const COLLATE_VERSION: &'static str = "2.09; 2020-07-31; GCT,JLL";
+const AIRMASS_VERSION: &'static str = "1.38; 2020-12-16; GCT,JLL";
+const AVERAGE_VERSION: &'static str = "1.37; 2020-07-31; GCT,JLL";
+const INSITU_VERSION: &'static str = "1.39; 2020-07-31; GCT,JLL";
+
 const ADCF_TABLE: &'static str = " Gas         ADCF      ADCF_Err  g    p
 \"xco2_6220\"  -0.00903  0.00025   15   4
 \"xco2_6339\"  -0.00512  0.00025   45   5
@@ -319,6 +326,48 @@ fn _all_equal_float(var: &netcdf::Variable, expected_value: f32, clargs: &CmdLin
     return Ok(is_ok)
 }
 
+fn _check_string_attribute_value(nch: &netcdf::File, att_name: &str, expected_value: &str, clargs: &CmdLineArgs) -> Result<bool, String> {
+    let att_val = match nch.attribute(att_name) {
+        Some(v) => {
+            match v.value() {
+                Ok(inner) => inner,
+                Err(err) => return Err(format!("Could not get value for attribute '{}': {}", att_name, err))
+            }
+        },
+        None => {
+            if clargs.verbosity >= 2 {
+                println!("  - FAIL: attribute '{}' is not present", att_name);
+            }
+            return Ok(false)
+        }
+    };
+
+    let att_val = match att_val {
+        netcdf::AttrValue::Str(s) => s,
+        _ => return Err(format!("Attribute '{}' has an unexpected type (expected string)", att_name))
+    };
+
+    let att_ok = att_val == expected_value;
+    if att_ok {
+        if !clargs.failures_only{
+            if clargs.verbosity == 2 {
+                println!("  - PASS: attribute '{}' has the expected value", att_name);
+            }else if clargs.verbosity == 3 {
+                println!("  - PASS: attribute '{}' has the expected value ('{}')", att_name, expected_value);
+            }
+        }
+    }else{
+        if clargs.verbosity >= 2 {
+            println!("  - FAIL: attribute '{}' has the wrong value", att_name);
+        }
+        if clargs.verbosity == 3 {
+            println!("      (expected = '{}', actual = '{}')", expected_value, att_val);
+        }
+    }
+
+    Ok(att_ok)
+}
+
 
 // *************** //
 // CHECK FUNCTIONS //
@@ -522,6 +571,31 @@ fn check_variables_present<'a>(nch: &netcdf::File, variables: &'a[String], expec
     return Ok(vars_ok);
 }
 
+fn check_program_versions(nch: &netcdf::File, clargs: &CmdLineArgs) -> Result<bool, String> {
+    if clargs.verbosity > 1 {
+        println!("\n=== Checking program versions ===");
+    }
+
+    let gsetup_ok = _check_string_attribute_value(nch, "gsetup_version", GSETUP_VERSION, clargs)?;
+    let gfit_ok = _check_string_attribute_value(nch, "gfit_version", GFIT_VERSION, clargs)?;
+    let collate_ok = _check_string_attribute_value(nch, "collate_results_version", COLLATE_VERSION, clargs)?;
+    let airmass_ok = _check_string_attribute_value(nch, "apply_airmass_correction_version", AIRMASS_VERSION, clargs)?;
+    let average_ok = _check_string_attribute_value(nch, "average_results_version", AVERAGE_VERSION, clargs)?;
+    let insitu_ok = _check_string_attribute_value(nch, "apply_insitu_correction_version", INSITU_VERSION, clargs)?;
+
+    let all_ok = gsetup_ok && gfit_ok && collate_ok && airmass_ok && average_ok && insitu_ok;
+
+    if clargs.verbosity == 1 {
+        if all_ok && !clargs.failures_only {
+            println!("* PASS: All program versions match expected");
+        }else if !all_ok {
+            println!("* FAIL: At least one program version does not match expected");
+        }
+    }
+
+    Ok(all_ok)
+}
+
 
 fn driver(nc_file: &str, clargs: &CmdLineArgs) -> Result<bool, String> {
     
@@ -538,8 +612,9 @@ fn driver(nc_file: &str, clargs: &CmdLineArgs) -> Result<bool, String> {
     let aicfs_ok = check_aicfs(&nch, &aicfs, clargs)?;
     let sfs_ok = check_window_scale_factors(&nch, &windows, clargs)?;
     let windows_ok = check_included_windows(&nch, &windows, &skipped_windows, clargs)?;
+    let versions_ok = check_program_versions(&nch, clargs)?;
 
-    let overall_ok = adcfs_ok && aicfs_ok && sfs_ok && windows_ok;
+    let overall_ok = adcfs_ok && aicfs_ok && sfs_ok && windows_ok && versions_ok;
     if clargs.verbosity >= 0 {
         if clargs.verbosity > 0 {println!("");}
 
