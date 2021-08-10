@@ -219,12 +219,13 @@ fn read_windows_table() -> (HashMap<String, Window>, Vec<String>) {
                 sf: sf
             };
 
-            println!("{} = {:?}", win_name, s);
             windows.insert(win_name, s);
         }
     }
 
-    println!("skipped windows = {:?}", skipped_windows);
+    // Remove any skipped windows that also show up in windows, as those were
+    // probably commented out because they conflict
+    skipped_windows.retain(|el| !windows.contains_key(el));
     return (windows, skipped_windows);
 }
 
@@ -253,6 +254,25 @@ fn get_window_name(table_line: &'static str) -> (String, &'static str, &'static 
     2 = print for each gas/window
     3 = print for each variable
  */
+fn _check_float_variable(nch: &netcdf::File, varname: &str, expected_value: f32, missing_ok: bool, verbosity: i8) -> Result<bool, String> {
+    let nc_data = match _get_var(nch, varname) {
+        Ok(data) => data,
+        Err(err) => {
+            if missing_ok {
+                if verbosity == 3 {
+                    println!("    - FAIL: variable '{}' is missing", varname);
+                }
+                return Ok(false);
+            }else{
+                return Err(err);
+            }
+        }
+    };
+
+    return _all_equal_float(&nc_data, expected_value, verbosity);
+
+}
+
 
 fn _get_var<'a>(nch: &'a netcdf::File, varname: &str) -> Result<netcdf::Variable<'a>, String> {
     match nch.variable(varname) {
@@ -334,17 +354,10 @@ fn check_one_adcf(nch: &netcdf::File, window: &str, adcf: &Adcf, verbosity: i8) 
         println!("  * Checking {} ADCFS:", window);
     }
 
-    let nc_adcfs = _get_var(nch, &format!("{}_adcf", window))?;
-    let adcfs_ok = _all_equal_float(&nc_adcfs, adcf.adcf, verbosity)?;
-
-    let nc_errs = _get_var(nch, &format!("{}_adcf_error", window))?;
-    let errs_ok = _all_equal_float(&nc_errs, adcf.err, verbosity)?;
-
-    let nc_g = _get_var(nch, &format!("{}_g", window))?;
-    let g_ok = _all_equal_float(&nc_g, adcf.g as f32, verbosity)?;
-
-    let nc_p = _get_var(nch, &format!("{}_p", window))?;
-    let p_ok = _all_equal_float(&nc_p, adcf.p as f32, verbosity)?;
+    let adcfs_ok = _check_float_variable(nch, &format!("{}_adcf", window), adcf.adcf, true, verbosity)?;
+    let errs_ok = _check_float_variable(nch, &format!("{}_adcf_error", window), adcf.err, true, verbosity)?;
+    let g_ok = _check_float_variable(nch, &format!("{}_g", window), adcf.g as f32, true, verbosity)?;
+    let p_ok = _check_float_variable(nch, &format!("{}_p", window), adcf.p as f32, true, verbosity)?;
 
     let all_ok = adcfs_ok && errs_ok && g_ok && p_ok;
 
@@ -386,11 +399,9 @@ fn check_aicfs(nch: &netcdf::File, aicfs: &HashMap<&'static str, Aicf>, verbosit
 
 
 fn check_one_aicf(nch: &netcdf::File, gas: &str, aicf: &Aicf, verbosity: i8) -> Result<bool, String> {
-    let nc_aicfs = _get_var(nch, &format!("{}_aicf", gas))?;
-    let aicfs_ok = _all_equal_float(&nc_aicfs, aicf.aicf, verbosity)?;
-
-    let nc_errs = _get_var(nch, &format!("{}_aicf_error", gas))?;
-    let errs_ok = _all_equal_float(&nc_errs, aicf.err, verbosity)?;
+    // let aicfs_ok = _all_equal_float(&nc_aicfs, aicf.aicf, verbosity)?;
+    let aicfs_ok = _check_float_variable(nch, &format!("{}_aicf", gas), aicf.aicf, true, verbosity)?;
+    let errs_ok = _check_float_variable(nch, &format!("{}_aicf_error", gas), aicf.err, true, verbosity)?;
 
     let all_ok = aicfs_ok && errs_ok;
 
@@ -402,11 +413,112 @@ fn check_one_aicf(nch: &netcdf::File, gas: &str, aicf: &Aicf, verbosity: i8) -> 
         }
     }
 
+    return Ok(all_ok);
+}
+
+fn check_window_scale_factors(nch: &netcdf::File, windows: &HashMap<String, Window>, verbosity: i8) -> Result<bool, String> {
+    let mut win_names: Vec<&str> = windows.keys().map(|x| x.as_ref()).collect();
+    win_names.sort_unstable();
+
+    if verbosity > 1 {
+        println!("\n=== Checking window-to-window scale factors ===");
+    }
+
+    let mut all_ok = true;
+    for win in win_names {
+        let win_ok = check_one_window_sf(nch, win, windows.get(win).unwrap(), verbosity)?;
+        all_ok = all_ok && win_ok;
+    }
+
+    if verbosity == 1 {
+        if all_ok {
+            println!("* PASS: Window-to-window scale factors match expected values");
+        }else {
+            println!("* FAIL: Window-to-window scale factors do not match expected values");
+        }
+    }
+
     Ok(all_ok)
 }
 
+fn check_one_window_sf(nch: &netcdf::File, win_name: &str, window: &Window, verbosity: i8) -> Result<bool, String> {
+    let nc_sfs = _get_var(nch, &format!("vsw_sf_{}", win_name))?;
+    let sfs_ok = _all_equal_float(&nc_sfs, window.sf, verbosity)?;
 
-fn driver(nc_file: &str, verbosity: i8) -> Result<(), String> {
+    if verbosity == 2 {
+        if sfs_ok {
+            println!("  - PASS: {} window-to-window scale factors are correct", win_name);
+        }else{
+            println!("  - FAIL: {} window-to-window scale factors are not correct", win_name);
+        }
+    }
+
+    return Ok(sfs_ok);
+}
+
+fn check_included_windows(nch: &netcdf::File, windows: &HashMap<String, Window>, skipped_windows: &Vec<String>, verbosity: i8) -> Result<bool, String> {
+    let mut expected_win_vars: Vec<String> = windows.keys().map(|win| format!("vsw_ada_x{}", win)).collect();
+    expected_win_vars.sort_unstable();
+    let mut unexpected_win_vars: Vec<String> = skipped_windows.iter().map(|win| format!("vsw_ada_x{}", win)).collect();
+    unexpected_win_vars.sort_unstable();
+
+    if verbosity > 1 {
+        println!("\n=== Checking windows present ===");
+    }
+
+    let ok_expected = check_variables_present(nch, &expected_win_vars, true, verbosity)?;
+    let ok_unexpected = check_variables_present(nch, &unexpected_win_vars, false, verbosity)?;
+
+    if verbosity == 1 {
+        if ok_expected {
+            println!("* PASS: All windows expected to be present are");
+        }else{
+            println!("* FAIL: At least one window expected to be present is missing");
+        }
+
+        if ok_unexpected {
+            println!("* PASS: All windows expected to be removed are");
+        }else{
+            println!("* FAIL: At least one window expected to have been removed is present");
+        }
+    }
+
+    Ok(ok_expected && ok_unexpected)
+}
+
+fn check_variables_present<'a>(nch: &netcdf::File, variables: &'a[String], expected: bool, verbosity: i8) -> Result<bool, String> {
+    let mut vars_ok = true;
+    for varname in variables {
+        if let Some(_) = nch.variable(varname) {
+            if expected {
+                if verbosity >= 2 {
+                    println!("  - PASS: variable '{}' is present as expected", varname);
+                }
+            }else{
+                vars_ok = false;
+                if verbosity >= 2 {
+                    println!("  - FAIL: variable '{}' is present but should not be", varname);
+                }
+            }
+        }else{
+            if expected {
+                vars_ok = false;
+                if verbosity >= 2 {
+                    println!("  - FAIL: variable '{}' is not present but should be", varname);
+                }
+            }else{
+                if verbosity >= 2 {
+                    println!("  - PASS: variable '{}' is absent as expected", varname);
+                }
+            }
+        }
+    }
+
+    return Ok(vars_ok);
+}
+
+
+fn driver(nc_file: &str, verbosity: i8) -> Result<bool, String> {
     
     let adcfs = read_adcf_table();
     let aicfs = read_aicf_table();
@@ -419,8 +531,21 @@ fn driver(nc_file: &str, verbosity: i8) -> Result<(), String> {
 
     let adcfs_ok = check_adcfs(&nch, &adcfs, verbosity)?;
     let aicfs_ok = check_aicfs(&nch, &aicfs, verbosity)?;
+    let sfs_ok = check_window_scale_factors(&nch, &windows, verbosity)?;
+    let windows_ok = check_included_windows(&nch, &windows, &skipped_windows, verbosity)?;
+
+    let overall_ok = adcfs_ok && aicfs_ok && sfs_ok && windows_ok;
+    if verbosity >= 0 {
+        if verbosity > 0 {println!("");}
+
+        if overall_ok {
+            println!("{} PASSES all tests - it appears to be a correct Phase 2 file", nc_file);
+        }else{
+            println!("{} FAILS at least one test - it may be a Phase 1 file", nc_file);
+        }
+    }
     
-    Ok(())
+    return Ok(overall_ok);
 }
 
 fn main() {
@@ -430,8 +555,14 @@ fn main() {
         std::process::exit(1);
     }
 
-    if let Err(msg) = driver(&clargs[1], 2) {
-        eprintln!("ERROR: {}", msg);
-        std::process::exit(2);
+    match driver(&clargs[1], 3) {
+        Ok(passes) => {
+            if passes {std::process::exit(0);}
+            else {std::process::exit(1);}
+        },
+        Err(msg) => {
+            eprintln!("ERROR: {}", msg);
+            std::process::exit(2);
+        }
     }
 }
