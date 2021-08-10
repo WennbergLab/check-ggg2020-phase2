@@ -32,6 +32,11 @@ args:
       help: "Suppresses all standard output to the terminal; pass or fail will only be indicated by the exit code (0 = pass, >0 = fail)"
       takes_value: false
       overrides_with: verbose
+  - failures_only:
+      short: f
+      long: --failures-only
+      help: "Only print out failure messages for higher verbosity messaging."
+      takes_value: false
   - nc_file:
       help: "The .private.nc file to check"
       required: true

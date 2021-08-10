@@ -255,12 +255,12 @@ fn get_window_name(table_line: &'static str) -> (String, &'static str, &'static 
     2 = print for each gas/window
     3 = print for each variable
  */
-fn _check_float_variable(nch: &netcdf::File, varname: &str, expected_value: f32, missing_ok: bool, verbosity: i8) -> Result<bool, String> {
+fn _check_float_variable(nch: &netcdf::File, varname: &str, expected_value: f32, missing_ok: bool, clargs: &CmdLineArgs) -> Result<bool, String> {
     let nc_data = match _get_var(nch, varname) {
         Ok(data) => data,
         Err(err) => {
             if missing_ok {
-                if verbosity == 3 {
+                if clargs.verbosity == 3 {
                     println!("    - FAIL: variable '{}' is missing", varname);
                 }
                 return Ok(false);
@@ -270,7 +270,7 @@ fn _check_float_variable(nch: &netcdf::File, varname: &str, expected_value: f32,
         }
     };
 
-    return _all_equal_float(&nc_data, expected_value, verbosity);
+    return _all_equal_float(&nc_data, expected_value, clargs);
 
 }
 
@@ -282,14 +282,14 @@ fn _get_var<'a>(nch: &'a netcdf::File, varname: &str) -> Result<netcdf::Variable
     }
 }
 
-fn _print_variable_results(varname: &str, n_total: usize, n_wrong: usize, verbosity: i8) -> bool {
+fn _print_variable_results(varname: &str, n_total: usize, n_wrong: usize, clargs: &CmdLineArgs) -> bool {
     let is_ok = n_wrong == 0;
     if is_ok {
-        if verbosity >= 3 {
+        if clargs.verbosity >= 3 && !clargs.failures_only{
             println!("    - PASS: {}", varname);
         }
     } else {
-        if verbosity >= 3 {
+        if clargs.verbosity >= 3 {
             let percent = n_wrong as f32 / n_total as f32 * 100.0;
             println!("    - FAIL: {}/{} ({:.2}%) of {} have incorrect values", n_wrong, n_total, percent, varname);
         }
@@ -298,7 +298,7 @@ fn _print_variable_results(varname: &str, n_total: usize, n_wrong: usize, verbos
     return is_ok;
 }
 
-fn _all_equal_float(var: &netcdf::Variable, expected_value: f32, verbosity: i8) -> Result<bool, String> {
+fn _all_equal_float(var: &netcdf::Variable, expected_value: f32, clargs: &CmdLineArgs) -> Result<bool, String> {
     let data = match var.values::<f32>(None, None) {
         Ok(arr) => arr,
         Err(err) => return Err(format!("Could not get data of '{}' variable: {}", var.name(), err))
@@ -315,7 +315,7 @@ fn _all_equal_float(var: &netcdf::Variable, expected_value: f32, verbosity: i8) 
     }
 
     
-    let is_ok = _print_variable_results(&var.name(), n_total, n_wrong, verbosity);
+    let is_ok = _print_variable_results(&var.name(), n_total, n_wrong, clargs);
     return Ok(is_ok)
 }
 
@@ -324,7 +324,9 @@ fn _all_equal_float(var: &netcdf::Variable, expected_value: f32, verbosity: i8) 
 // CHECK FUNCTIONS //
 // *************** //
 
-fn check_adcfs(nch: &netcdf::File, adcfs: &HashMap<&'static str, Adcf>, verbosity: i8) -> Result<bool, String> {
+fn check_adcfs(nch: &netcdf::File, adcfs: &HashMap<&'static str, Adcf>, clargs: &CmdLineArgs) -> Result<bool, String> {
+    let verbosity = clargs.verbosity;
+    
     // Get the windows in alphanumeric order
     let mut windows: Vec<&'static str> = adcfs.keys().map(|x| *x).collect();
     windows.sort_unstable();
@@ -335,13 +337,13 @@ fn check_adcfs(nch: &netcdf::File, adcfs: &HashMap<&'static str, Adcf>, verbosit
 
     let mut all_ok = true;
     for window in windows {
-        let win_ok = check_one_adcf(nch, window, adcfs.get(window).unwrap(), verbosity)?;
+        let win_ok = check_one_adcf(nch, window, adcfs.get(window).unwrap(), clargs)?;
         all_ok = all_ok && win_ok;
     }
 
     if verbosity == 1 {
         if all_ok {
-            println!("* PASS: ADCFs match expected values");
+            if !clargs.failures_only{ println!("* PASS: ADCFs match expected values") }; 
         }else {
             println!("* FAIL: ADCFs do not match expected values");
         }
@@ -350,21 +352,23 @@ fn check_adcfs(nch: &netcdf::File, adcfs: &HashMap<&'static str, Adcf>, verbosit
     Ok(all_ok)
 }
 
-fn check_one_adcf(nch: &netcdf::File, window: &str, adcf: &Adcf, verbosity: i8) -> Result<bool, String> {
+fn check_one_adcf(nch: &netcdf::File, window: &str, adcf: &Adcf, clargs: &CmdLineArgs) -> Result<bool, String> {
+    let verbosity = clargs.verbosity;
+
     if verbosity > 2 {
         println!("  * Checking {} ADCFS:", window);
     }
 
-    let adcfs_ok = _check_float_variable(nch, &format!("{}_adcf", window), adcf.adcf, true, verbosity)?;
-    let errs_ok = _check_float_variable(nch, &format!("{}_adcf_error", window), adcf.err, true, verbosity)?;
-    let g_ok = _check_float_variable(nch, &format!("{}_g", window), adcf.g as f32, true, verbosity)?;
-    let p_ok = _check_float_variable(nch, &format!("{}_p", window), adcf.p as f32, true, verbosity)?;
+    let adcfs_ok = _check_float_variable(nch, &format!("{}_adcf", window), adcf.adcf, true, clargs)?;
+    let errs_ok = _check_float_variable(nch, &format!("{}_adcf_error", window), adcf.err, true, clargs)?;
+    let g_ok = _check_float_variable(nch, &format!("{}_g", window), adcf.g as f32, true, clargs)?;
+    let p_ok = _check_float_variable(nch, &format!("{}_p", window), adcf.p as f32, true, clargs)?;
 
     let all_ok = adcfs_ok && errs_ok && g_ok && p_ok;
 
     if verbosity == 2 {
         if all_ok {
-            println!("  - PASS: {} ADCFs are correct", window);
+            if !clargs.failures_only{ println!("  - PASS: {} ADCFs are correct", window) };
         }else{
             println!("  - FAIL: {} ADCFS are incorrect", window);
         }
@@ -373,23 +377,23 @@ fn check_one_adcf(nch: &netcdf::File, window: &str, adcf: &Adcf, verbosity: i8) 
     Ok(all_ok)
 }
 
-fn check_aicfs(nch: &netcdf::File, aicfs: &HashMap<&'static str, Aicf>, verbosity: i8) -> Result<bool, String> {
+fn check_aicfs(nch: &netcdf::File, aicfs: &HashMap<&'static str, Aicf>, clargs: &CmdLineArgs) -> Result<bool, String> {
     let mut gases: Vec<&'static str> = aicfs.keys().map(|x| *x).collect();
     gases.sort_unstable();
 
-    if verbosity > 1 {
+    if clargs.verbosity > 1 {
         println!("\n=== Checking AICF values ===");
     }
 
     let mut all_ok = true;
     for gas in gases {
-        let gas_ok = check_one_aicf(nch, gas, aicfs.get(gas).unwrap(), verbosity)?;
+        let gas_ok = check_one_aicf(nch, gas, aicfs.get(gas).unwrap(), clargs)?;
         all_ok = all_ok && gas_ok;
     }
 
-    if verbosity == 1 {
+    if clargs.verbosity == 1 {
         if all_ok {
-            println!("* PASS: AICFs match expected values");
+            if !clargs.failures_only{ println!("* PASS: AICFs match expected values") };
         }else{
             println!("* FAIL: AICFs do not match expected values");
         }
@@ -399,16 +403,16 @@ fn check_aicfs(nch: &netcdf::File, aicfs: &HashMap<&'static str, Aicf>, verbosit
 }
 
 
-fn check_one_aicf(nch: &netcdf::File, gas: &str, aicf: &Aicf, verbosity: i8) -> Result<bool, String> {
+fn check_one_aicf(nch: &netcdf::File, gas: &str, aicf: &Aicf, clargs: &CmdLineArgs) -> Result<bool, String> {
     // let aicfs_ok = _all_equal_float(&nc_aicfs, aicf.aicf, verbosity)?;
-    let aicfs_ok = _check_float_variable(nch, &format!("{}_aicf", gas), aicf.aicf, true, verbosity)?;
-    let errs_ok = _check_float_variable(nch, &format!("{}_aicf_error", gas), aicf.err, true, verbosity)?;
+    let aicfs_ok = _check_float_variable(nch, &format!("{}_aicf", gas), aicf.aicf, true, clargs)?;
+    let errs_ok = _check_float_variable(nch, &format!("{}_aicf_error", gas), aicf.err, true, clargs)?;
 
     let all_ok = aicfs_ok && errs_ok;
 
-    if verbosity == 2 {
+    if clargs.verbosity == 2 {
         if all_ok {
-            println!("  - PASS: {} AICFS are correct", gas);
+            if !clargs.failures_only{ println!("  - PASS: {} AICFS are correct", gas) };
         }else{
             println!("  - FAIL: {} AICFS are not correct", gas);
         }
@@ -417,23 +421,23 @@ fn check_one_aicf(nch: &netcdf::File, gas: &str, aicf: &Aicf, verbosity: i8) -> 
     return Ok(all_ok);
 }
 
-fn check_window_scale_factors(nch: &netcdf::File, windows: &HashMap<String, Window>, verbosity: i8) -> Result<bool, String> {
+fn check_window_scale_factors(nch: &netcdf::File, windows: &HashMap<String, Window>, clargs: &CmdLineArgs) -> Result<bool, String> {
     let mut win_names: Vec<&str> = windows.keys().map(|x| x.as_ref()).collect();
     win_names.sort_unstable();
 
-    if verbosity > 1 {
+    if clargs.verbosity > 1 {
         println!("\n=== Checking window-to-window scale factors ===");
     }
 
     let mut all_ok = true;
     for win in win_names {
-        let win_ok = check_one_window_sf(nch, win, windows.get(win).unwrap(), verbosity)?;
+        let win_ok = check_one_window_sf(nch, win, windows.get(win).unwrap(), clargs)?;
         all_ok = all_ok && win_ok;
     }
 
-    if verbosity == 1 {
+    if clargs.verbosity == 1 {
         if all_ok {
-            println!("* PASS: Window-to-window scale factors match expected values");
+            if !clargs.failures_only{ println!("* PASS: Window-to-window scale factors match expected values") };
         }else {
             println!("* FAIL: Window-to-window scale factors do not match expected values");
         }
@@ -442,13 +446,13 @@ fn check_window_scale_factors(nch: &netcdf::File, windows: &HashMap<String, Wind
     Ok(all_ok)
 }
 
-fn check_one_window_sf(nch: &netcdf::File, win_name: &str, window: &Window, verbosity: i8) -> Result<bool, String> {
+fn check_one_window_sf(nch: &netcdf::File, win_name: &str, window: &Window, clargs: &CmdLineArgs) -> Result<bool, String> {
     let nc_sfs = _get_var(nch, &format!("vsw_sf_{}", win_name))?;
-    let sfs_ok = _all_equal_float(&nc_sfs, window.sf, verbosity)?;
+    let sfs_ok = _all_equal_float(&nc_sfs, window.sf, clargs)?;
 
-    if verbosity == 2 {
+    if clargs.verbosity == 2 {
         if sfs_ok {
-            println!("  - PASS: {} window-to-window scale factors are correct", win_name);
+            if !clargs.failures_only {println!("  - PASS: {} window-to-window scale factors are correct", win_name)};
         }else{
             println!("  - FAIL: {} window-to-window scale factors are not correct", win_name);
         }
@@ -457,28 +461,28 @@ fn check_one_window_sf(nch: &netcdf::File, win_name: &str, window: &Window, verb
     return Ok(sfs_ok);
 }
 
-fn check_included_windows(nch: &netcdf::File, windows: &HashMap<String, Window>, skipped_windows: &Vec<String>, verbosity: i8) -> Result<bool, String> {
+fn check_included_windows(nch: &netcdf::File, windows: &HashMap<String, Window>, skipped_windows: &Vec<String>, clargs: &CmdLineArgs) -> Result<bool, String> {
     let mut expected_win_vars: Vec<String> = windows.keys().map(|win| format!("vsw_ada_x{}", win)).collect();
     expected_win_vars.sort_unstable();
     let mut unexpected_win_vars: Vec<String> = skipped_windows.iter().map(|win| format!("vsw_ada_x{}", win)).collect();
     unexpected_win_vars.sort_unstable();
 
-    if verbosity > 1 {
+    if clargs.verbosity > 1 {
         println!("\n=== Checking windows present ===");
     }
 
-    let ok_expected = check_variables_present(nch, &expected_win_vars, true, verbosity)?;
-    let ok_unexpected = check_variables_present(nch, &unexpected_win_vars, false, verbosity)?;
+    let ok_expected = check_variables_present(nch, &expected_win_vars, true, clargs)?;
+    let ok_unexpected = check_variables_present(nch, &unexpected_win_vars, false, clargs)?;
 
-    if verbosity == 1 {
+    if clargs.verbosity == 1 {
         if ok_expected {
-            println!("* PASS: All windows expected to be present are");
+            if !clargs.failures_only{println!("* PASS: All windows expected to be present are")};
         }else{
             println!("* FAIL: At least one window expected to be present is missing");
         }
 
         if ok_unexpected {
-            println!("* PASS: All windows expected to be removed are");
+            if !clargs.failures_only{println!("* PASS: All windows expected to be removed are")};
         }else{
             println!("* FAIL: At least one window expected to have been removed is present");
         }
@@ -487,29 +491,29 @@ fn check_included_windows(nch: &netcdf::File, windows: &HashMap<String, Window>,
     Ok(ok_expected && ok_unexpected)
 }
 
-fn check_variables_present<'a>(nch: &netcdf::File, variables: &'a[String], expected: bool, verbosity: i8) -> Result<bool, String> {
+fn check_variables_present<'a>(nch: &netcdf::File, variables: &'a[String], expected: bool, clargs: &CmdLineArgs) -> Result<bool, String> {
     let mut vars_ok = true;
     for varname in variables {
         if let Some(_) = nch.variable(varname) {
             if expected {
-                if verbosity >= 2 {
-                    println!("  - PASS: variable '{}' is present as expected", varname);
+                if clargs.verbosity >= 2 {
+                    if !clargs.failures_only{ println!("  - PASS: variable '{}' is present as expected", varname) };
                 }
             }else{
                 vars_ok = false;
-                if verbosity >= 2 {
+                if clargs.verbosity >= 2 {
                     println!("  - FAIL: variable '{}' is present but should not be", varname);
                 }
             }
         }else{
             if expected {
                 vars_ok = false;
-                if verbosity >= 2 {
+                if clargs.verbosity >= 2 {
                     println!("  - FAIL: variable '{}' is not present but should be", varname);
                 }
             }else{
-                if verbosity >= 2 {
-                    println!("  - PASS: variable '{}' is absent as expected", varname);
+                if clargs.verbosity >= 2 {
+                    if !clargs.failures_only{ println!("  - PASS: variable '{}' is absent as expected", varname) };
                 }
             }
         }
@@ -519,7 +523,7 @@ fn check_variables_present<'a>(nch: &netcdf::File, variables: &'a[String], expec
 }
 
 
-fn driver(nc_file: &str, verbosity: i8) -> Result<bool, String> {
+fn driver(nc_file: &str, clargs: &CmdLineArgs) -> Result<bool, String> {
     
     let adcfs = read_adcf_table();
     let aicfs = read_aicf_table();
@@ -530,14 +534,14 @@ fn driver(nc_file: &str, verbosity: i8) -> Result<bool, String> {
         Err(err) => return Err(format!("Unable to open {}: {}", nc_file, err))
     };
 
-    let adcfs_ok = check_adcfs(&nch, &adcfs, verbosity)?;
-    let aicfs_ok = check_aicfs(&nch, &aicfs, verbosity)?;
-    let sfs_ok = check_window_scale_factors(&nch, &windows, verbosity)?;
-    let windows_ok = check_included_windows(&nch, &windows, &skipped_windows, verbosity)?;
+    let adcfs_ok = check_adcfs(&nch, &adcfs, clargs)?;
+    let aicfs_ok = check_aicfs(&nch, &aicfs, clargs)?;
+    let sfs_ok = check_window_scale_factors(&nch, &windows, clargs)?;
+    let windows_ok = check_included_windows(&nch, &windows, &skipped_windows, clargs)?;
 
     let overall_ok = adcfs_ok && aicfs_ok && sfs_ok && windows_ok;
-    if verbosity >= 0 {
-        if verbosity > 0 {println!("");}
+    if clargs.verbosity >= 0 {
+        if clargs.verbosity > 0 {println!("");}
 
         if overall_ok {
             println!("{} PASSES all tests - it appears to be a correct Phase 2 file", nc_file);
@@ -552,7 +556,8 @@ fn driver(nc_file: &str, verbosity: i8) -> Result<bool, String> {
 #[derive(Debug)]
 struct CmdLineArgs {
     nc_file: String,
-    verbosity: i8
+    verbosity: i8,
+    failures_only: bool
 }
 
 fn parse_clargs() -> CmdLineArgs {
@@ -562,10 +567,12 @@ fn parse_clargs() -> CmdLineArgs {
     let nc_file = clargs.value_of("nc_file").unwrap();
     let nverb = clargs.occurrences_of("verbose");
     let nquiet = clargs.occurrences_of("quiet");
+    let failures_only = clargs.occurrences_of("failures_only") > 0;
 
     let args = CmdLineArgs{
         nc_file: String::from(nc_file),
-        verbosity: if nquiet > 0 {-1} else {nverb as i8}
+        verbosity: if nquiet > 0 {-1} else {nverb as i8},
+        failures_only: failures_only
     };
 
     return args;
@@ -574,7 +581,7 @@ fn parse_clargs() -> CmdLineArgs {
 fn main() {
     let clargs = parse_clargs();
 
-    match driver(&clargs.nc_file, clargs.verbosity) {
+    match driver(&clargs.nc_file, &clargs) {
         Ok(passes) => {
             if passes {std::process::exit(0);}
             else {std::process::exit(1);}
