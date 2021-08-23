@@ -11,6 +11,9 @@ const COLLATE_VERSION: &'static str = "2.09; 2020-07-31; GCT,JLL";
 const AIRMASS_VERSION: &'static str = "1.38; 2020-12-16; GCT,JLL";
 const AVERAGE_VERSION: &'static str = "1.37; 2020-07-31; GCT,JLL";
 const INSITU_VERSION: &'static str = "1.39; 2020-07-31; GCT,JLL";
+const WRITE_NC_HASH: &'static str = "4bdcf4c";
+
+const ATT_MISSING_STR: &'static str = "!!MISSING!!";
 
 const ADCF_TABLE: &'static str = " Gas         ADCF      ADCF_Err  g    p
 \"xco2_6220\"  -0.00903  0.00025   15   4
@@ -326,7 +329,7 @@ fn _all_equal_float(var: &netcdf::Variable, expected_value: f32, clargs: &CmdLin
     return Ok(is_ok)
 }
 
-fn _check_string_attribute_value(nch: &netcdf::File, att_name: &str, expected_value: &str, clargs: &CmdLineArgs) -> Result<bool, String> {
+fn _get_string_attribute_value(nch: &netcdf::File, att_name: &str, clargs: &CmdLineArgs) -> Result<String, String> {
     let att_val = match nch.attribute(att_name) {
         Some(v) => {
             match v.value() {
@@ -338,7 +341,7 @@ fn _check_string_attribute_value(nch: &netcdf::File, att_name: &str, expected_va
             if clargs.verbosity >= 2 {
                 println!("  - FAIL: attribute '{}' is not present", att_name);
             }
-            return Ok(false)
+            return Ok(String::from(ATT_MISSING_STR))
         }
     };
 
@@ -346,6 +349,15 @@ fn _check_string_attribute_value(nch: &netcdf::File, att_name: &str, expected_va
         netcdf::AttrValue::Str(s) => s,
         _ => return Err(format!("Attribute '{}' has an unexpected type (expected string)", att_name))
     };
+
+    return Ok(att_val);
+}
+
+fn _check_string_attribute_value(nch: &netcdf::File, att_name: &str, expected_value: &str, clargs: &CmdLineArgs) -> Result<bool, String> {
+    let att_val = _get_string_attribute_value(nch, att_name, clargs)?;
+    if att_val == ATT_MISSING_STR {
+        return Ok(false)
+    }
 
     let att_ok = att_val == expected_value;
     if att_ok {
@@ -571,6 +583,47 @@ fn check_variables_present<'a>(nch: &netcdf::File, variables: &'a[String], expec
     return Ok(vars_ok);
 }
 
+fn _check_write_netcdf_hash(nch: &netcdf::File, clargs: &CmdLineArgs) -> Result<bool, String> {
+    let att_name = "code_version";
+    let att_val = _get_string_attribute_value(nch, att_name, clargs)?;
+    if att_val == ATT_MISSING_STR {
+        if clargs.verbosity >= 2 {
+            println!("  - FAIL: attribute '{}' is not present", att_name);
+        }
+        return Ok(false);
+    }
+
+    lazy_static! {
+        static ref RE: Regex = Regex::new(r"commit ([0-9a-f]+)").unwrap();
+    }
+
+    let hash = if let Some(caps) = RE.captures(&att_val) {
+        caps.get(1).unwrap().as_str()
+    }else{
+        return Err(format!("Could not get the write_netcdf commit hash from the attribute {}", att_name));
+    };
+
+    let hash_ok = hash == WRITE_NC_HASH;
+    if hash_ok {
+        if !clargs.failures_only{
+            if clargs.verbosity == 2 {
+                println!("  - PASS: write_netcdf hash in attribute '{}' has the expected value", att_name);
+            }else if clargs.verbosity == 3 {
+                println!("  - PASS: write_netcdf hash in attribute '{}' has the expected value ('{}')", att_name, WRITE_NC_HASH);
+            }
+        }
+    }else{
+        if clargs.verbosity >= 2 {
+            println!("  - FAIL: write_netcdf hash in attribute '{}' has the wrong value", att_name);
+        }
+        if clargs.verbosity == 3 {
+            println!("      (expected = '{}', actual = '{}')", WRITE_NC_HASH, att_val);
+        }
+    }
+
+    return Ok(hash_ok);
+}
+
 fn check_program_versions(nch: &netcdf::File, clargs: &CmdLineArgs) -> Result<bool, String> {
     if clargs.verbosity > 1 {
         println!("\n=== Checking program versions ===");
@@ -582,8 +635,9 @@ fn check_program_versions(nch: &netcdf::File, clargs: &CmdLineArgs) -> Result<bo
     let airmass_ok = _check_string_attribute_value(nch, "apply_airmass_correction_version", AIRMASS_VERSION, clargs)?;
     let average_ok = _check_string_attribute_value(nch, "average_results_version", AVERAGE_VERSION, clargs)?;
     let insitu_ok = _check_string_attribute_value(nch, "apply_insitu_correction_version", INSITU_VERSION, clargs)?;
+    let write_nc_ok = _check_write_netcdf_hash(nch, clargs)?;
 
-    let all_ok = gsetup_ok && gfit_ok && collate_ok && airmass_ok && average_ok && insitu_ok;
+    let all_ok = gsetup_ok && gfit_ok && collate_ok && airmass_ok && average_ok && insitu_ok && write_nc_ok;
 
     if clargs.verbosity == 1 {
         if all_ok && !clargs.failures_only {
