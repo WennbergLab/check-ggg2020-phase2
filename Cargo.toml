@@ -17,4 +17,4 @@ features = ["yaml"]
 
 [dependencies.netcdf]
 version = "0.6.1"
-#features = ["static"]
+features = ["static"]
