@@ -11,7 +11,7 @@ const COLLATE_VERSION: &'static str = "2.09; 2020-07-31; GCT,JLL";
 const AIRMASS_VERSION: &'static str = "1.38; 2020-12-16; GCT,JLL";
 const AVERAGE_VERSION: &'static str = "1.37; 2020-07-31; GCT,JLL";
 const INSITU_VERSION: &'static str = "1.39; 2020-07-31; GCT,JLL";
-const WRITE_NC_HASH: &'static str = "e1a644a";
+const WRITE_NC_HASH: &'static str = "42ed12d";
 
 const ATT_MISSING_STR: &'static str = "!!MISSING!!";
 
@@ -620,7 +620,7 @@ fn _check_write_netcdf_hash(nch: &netcdf::File, clargs: &CmdLineArgs) -> Result<
             println!("  - FAIL: write_netcdf hash in attribute '{}' has the wrong value", att_name);
         }
         if clargs.verbosity == 3 {
-            println!("      (expected = '{}', actual = '{}')", WRITE_NC_HASH, att_val);
+            println!("      (expected = '{}', actual = '{}')", WRITE_NC_HASH, hash);
         }
     }
 
