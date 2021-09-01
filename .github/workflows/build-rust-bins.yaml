@@ -30,6 +30,7 @@ jobs:
           name: check-phase2-linux64
           path: target/release/check-phase2
   build-macos-darwin:
+    if: false
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
@@ -46,6 +47,7 @@ jobs:
           name: check-phase2-apple-darwin64
           path: target/release/check-phase2
   build-windows:
+    if: false
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v2
